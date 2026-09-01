@@ -1,0 +1,1138 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>教師成績登記與管理系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@300;400;500;600;700&display=swap');
+        body {
+            font-family: 'Noto Sans TC', sans-serif;
+        }
+        /* 美化滾動條 */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
+        }
+
+        /* 列印專屬樣式 */
+        @media print {
+            body {
+                background: white !important;
+                color: black !important;
+            }
+            .no-print {
+                display: none !important;
+            }
+            .print-only {
+                display: block !important;
+            }
+            .print-page-break {
+                page-break-after: always;
+            }
+            .mini-slip {
+                box-shadow: none !important;
+                border: 1px solid #1e293b !important;
+                break-inside: avoid;
+            }
+        }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+    <div id="app" class="min-h-screen flex flex-col">
+
+        <!-- 密碼登入遮罩 -->
+        <div v-if="!isAuthenticated" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 backdrop-blur-sm p-4 no-print">
+            <div class="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8 border border-slate-100 text-center relative overflow-hidden">
+                <div class="w-16 h-16 bg-indigo-100 rounded-2xl flex items-center justify-center mx-auto mb-4 text-indigo-600">
+                    <i class="fa-solid fa-user-lock text-3xl"></i>
+                </div>
+                <h2 class="text-2xl font-bold text-slate-800 mb-1">教師系統登入</h2>
+                <p class="text-slate-500 text-sm mb-6">請輸入安全密碼以開啟成績管理面板</p>
+                
+                <form @submit.prevent="checkPassword" class="space-y-4">
+                    <div class="relative">
+                        <input 
+                            :type="showPassword ? 'text' : 'password'" 
+                            v-model="inputPassword" 
+                            placeholder="請輸入密碼" 
+                            class="w-full px-4 py-3 rounded-xl border border-slate-300 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-center text-lg tracking-widest transition-all"
+                            required 
+                            ref="passInput"
+                        />
+                        <button type="button" @click="showPassword = !showPassword" class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                            <i :class="showPassword ? 'fa-regular fa-eye-slash' : 'fa-regular fa-eye'"></i>
+                        </button>
+                    </div>
+
+                    <p v-if="authError" class="text-red-500 text-sm flex items-center justify-center gap-1 font-medium">
+                        <i class="fa-solid fa-circle-exclamation"></i> 密碼錯誤，請重新輸入！
+                    </p>
+
+                    <button type="submit" class="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl shadow-lg shadow-indigo-200 transition-all flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-right-to-bracket"></i> 驗證登入
+                    </button>
+                </form>
+            </div>
+        </div>
+
+        <!-- 主要管理系統 -->
+        <template v-if="isAuthenticated">
+            <header class="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm no-print">
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-md shadow-indigo-200">
+                            <i class="fa-solid fa-graduation-cap text-xl"></i>
+                        </div>
+                        <div>
+                            <h1 class="font-bold text-slate-800 text-lg leading-tight">教師成績登記與評比系統</h1>
+                            <p class="text-xs text-slate-500">班級總人數：{{ students.length }} 人</p>
+                        </div>
+                    </div>
+
+                    <!-- 段考選擇選單 -->
+                    <div class="flex items-center gap-3">
+                        <div class="flex items-center bg-indigo-50 border border-indigo-200 rounded-xl px-3 py-1.5">
+                            <i class="fa-solid fa-calendar-check text-indigo-600 mr-2 text-sm"></i>
+                            <span class="text-xs font-semibold text-indigo-800 mr-2 hidden sm:inline">當前段考：</span>
+                            <select v-model="selectedExamId" class="bg-transparent font-bold text-indigo-900 text-sm focus:outline-none cursor-pointer">
+                                <option v-for="exam in exams" :key="exam.id" :value="exam.id">
+                                    {{ exam.name }}
+                                </option>
+                            </select>
+                        </div>
+
+                        <button @click="logout" class="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-xl transition-all" title="鎖定系統">
+                            <i class="fa-solid fa-lock text-lg"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- 導覽分頁頁籤 -->
+                <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex space-x-1 sm:space-x-4 border-t border-slate-100 overflow-x-auto">
+                    <button 
+                        @click="activeTab = 'entry'" 
+                        :class="['px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 transition-all', activeTab === 'entry' ? 'border-indigo-600 text-indigo-600 font-bold' : 'border-transparent text-slate-500 hover:text-slate-700']">
+                        <i class="fa-solid fa-pen-to-square"></i> 成績登記
+                    </button>
+                    <button 
+                        @click="activeTab = 'ranking'" 
+                        :class="['px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 transition-all', activeTab === 'ranking' ? 'border-indigo-600 text-indigo-600 font-bold' : 'border-transparent text-slate-500 hover:text-slate-700']">
+                        <i class="fa-solid fa-trophy"></i> 班級排名與分佈
+                    </button>
+                    <button 
+                        @click="activeTab = 'progress'" 
+                        :class="['px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 transition-all', activeTab === 'progress' ? 'border-indigo-600 text-indigo-600 font-bold' : 'border-transparent text-slate-500 hover:text-slate-700']">
+                        <i class="fa-solid fa-chart-line"></i> 進步獎評比
+                    </button>
+                    <button 
+                        @click="activeTab = 'slips'" 
+                        :class="['px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 transition-all', activeTab === 'slips' ? 'border-indigo-600 text-indigo-600 font-bold' : 'border-transparent text-slate-500 hover:text-slate-700']">
+                        <i class="fa-solid fa-print"></i> 單人/小成績單列印
+                    </button>
+                    <button 
+                        @click="activeTab = 'settings'" 
+                        :class="['px-4 py-3 text-sm font-medium border-b-2 whitespace-nowrap flex items-center gap-2 transition-all', activeTab === 'settings' ? 'border-indigo-600 text-indigo-600 font-bold' : 'border-transparent text-slate-500 hover:text-slate-700']">
+                        <i class="fa-solid fa-gear"></i> 科目/段考/學生管理
+                    </button>
+                </div>
+            </header>
+
+            <!-- 主要內容區域 -->
+            <main class="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8">
+
+                <!-- 頁籤 1: 成績登記表單 -->
+                <div v-if="activeTab === 'entry'" class="space-y-4 no-print">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-4 rounded-2xl shadow-sm border border-slate-200">
+                        <div>
+                            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                <span>{{ currentExam.name }} - 成績快速輸入</span>
+                                <span class="text-xs font-normal text-slate-500 bg-slate-100 px-2.5 py-1 rounded-full">共 {{ students.length }} 人</span>
+                            </h2>
+                            <p class="text-xs text-slate-500 mt-0.5">點擊欄位即可快速修改成績。標示「不計分」的科目不會納入總分與排名。</p>
+                        </div>
+                        
+                        <div class="flex items-center gap-2">
+                            <input 
+                                type="text" 
+                                v-model="searchQuery" 
+                                placeholder="搜尋姓名/座號..." 
+                                class="px-3 py-1.5 text-sm border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                            >
+                            <button @click="resetScoresConfirm" class="px-3 py-1.5 text-xs bg-slate-100 hover:bg-rose-50 hover:text-rose-600 text-slate-600 font-medium rounded-xl transition-all">
+                                清空此段考
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- 成績輸入表格 -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        <div class="overflow-x-auto max-h-[calc(100vh-280px)]">
+                            <table class="w-full text-left border-collapse min-w-[700px]">
+                                <thead class="bg-slate-50 sticky top-0 z-10 border-b border-slate-200 shadow-sm">
+                                    <tr>
+                                        <th class="py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider w-16 text-center">座號</th>
+                                        <th class="py-3 px-4 text-xs font-bold text-slate-500 uppercase tracking-wider min-w-[120px]">姓名</th>
+                                        <th 
+                                            v-for="sub in subjects" 
+                                            :key="sub.id" 
+                                            class="py-3 px-3 text-xs font-bold text-slate-700 uppercase tracking-wider text-center border-l border-slate-100"
+                                        >
+                                            <div class="flex flex-col items-center">
+                                                <span>{{ sub.name }}</span>
+                                                <span 
+                                                    :class="sub.includeInTotal ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'"
+                                                    class="text-[10px] px-1.5 py-0.5 rounded font-normal mt-0.5"
+                                                >
+                                                    {{ sub.includeInTotal ? '計分' : '不計分' }}
+                                                </span>
+                                            </div>
+                                        </th>
+                                        <th class="py-3 px-4 text-xs font-bold text-indigo-600 uppercase tracking-wider text-center border-l border-slate-200 bg-indigo-50/50">採計總分</th>
+                                        <th class="py-3 px-4 text-xs font-bold text-indigo-600 uppercase tracking-wider text-center bg-indigo-50/50">個人平均</th>
+                                        <th class="py-3 px-4 text-xs font-bold text-indigo-600 uppercase tracking-wider text-center bg-indigo-50/50">班級排名</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100 text-sm">
+                                    <tr 
+                                        v-for="student in filteredStudents" 
+                                        :key="student.id"
+                                        class="hover:bg-indigo-50/30 transition-colors"
+                                    >
+                                        <td class="py-2.5 px-4 font-mono font-medium text-slate-400 text-center">{{ student.id }}</td>
+                                        <td class="py-2.5 px-4 font-semibold text-slate-700 flex items-center justify-between group">
+                                            <span>{{ student.name }}</span>
+                                            <button @click="editStudentName(student)" class="opacity-0 group-hover:opacity-100 text-xs text-indigo-500 hover:text-indigo-700 p-1" title="修改名字">
+                                                <i class="fa-solid fa-pen"></i>
+                                            </button>
+                                        </td>
+                                        
+                                        <!-- 各科成績輸入框 -->
+                                        <td v-for="sub in subjects" :key="sub.id" class="py-2 px-2 border-l border-slate-100 text-center">
+                                            <input 
+                                                type="number" 
+                                                v-model.number="grades[selectedExamId][student.id][sub.id]"
+                                                min="0"
+                                                max="100"
+                                                class="w-16 text-center py-1 rounded-lg border border-slate-200 focus:outline-none focus:ring-2 focus:ring-indigo-500 font-mono font-semibold"
+                                                :class="{'text-slate-400 font-normal bg-slate-50': !sub.includeInTotal, 'text-rose-600': grades[selectedExamId][student.id][sub.id] < 60}"
+                                            >
+                                        </td>
+
+                                        <td class="py-2.5 px-4 font-mono font-bold text-slate-800 text-center bg-indigo-50/20 border-l border-slate-200">
+                                            {{ getStudentStats(selectedExamId, student.id).total }}
+                                        </td>
+                                        <td class="py-2.5 px-4 font-mono font-bold text-indigo-600 text-center bg-indigo-50/20">
+                                            {{ getStudentStats(selectedExamId, student.id).avg }}
+                                        </td>
+                                        <td class="py-2.5 px-4 font-mono font-bold text-amber-600 text-center bg-indigo-50/20">
+                                            第 {{ getStudentStats(selectedExamId, student.id).rank }} 名
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 頁籤 2: 班級排名與成績分佈 -->
+                <div v-if="activeTab === 'ranking'" class="space-y-6 no-print">
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-4">
+                            <div>
+                                <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                    <i class="fa-solid fa-trophy text-amber-500"></i>
+                                    {{ currentExam.name }} - 班級排名與成績分佈
+                                </h2>
+                                <p class="text-xs text-slate-500 mt-1">採計科目：{{ includedSubjectsCount }} 科 (全班平均：<span class="font-bold font-mono text-indigo-600">{{ classAverage }}</span> 分)</p>
+                            </div>
+                            <button @click="activeTab = 'slips'" class="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-xl flex items-center gap-2 shadow-sm transition-all">
+                                <i class="fa-solid fa-print"></i> 前往列印個人成績單
+                            </button>
+                        </div>
+
+                        <!-- 成績區間統計卡片 (90+, 80~89, 70~79, 60~69, <60) -->
+                        <div class="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-2">
+                            <div class="bg-emerald-50 border border-emerald-200 rounded-xl p-3 text-center">
+                                <span class="text-xs font-bold text-emerald-800 block">90分以上</span>
+                                <span class="text-xl font-black font-mono text-emerald-700">{{ scoreDistribution.range90 }} <span class="text-xs font-normal">人</span></span>
+                                <span class="text-[10px] text-emerald-600 block mt-0.5">{{ scoreDistribution.percent90 }}%</span>
+                            </div>
+                            <div class="bg-blue-50 border border-blue-200 rounded-xl p-3 text-center">
+                                <span class="text-xs font-bold text-blue-800 block">80 ~ 89分</span>
+                                <span class="text-xl font-black font-mono text-blue-700">{{ scoreDistribution.range80 }} <span class="text-xs font-normal">人</span></span>
+                                <span class="text-[10px] text-blue-600 block mt-0.5">{{ scoreDistribution.percent80 }}%</span>
+                            </div>
+                            <div class="bg-indigo-50 border border-indigo-200 rounded-xl p-3 text-center">
+                                <span class="text-xs font-bold text-indigo-800 block">70 ~ 79分</span>
+                                <span class="text-xl font-black font-mono text-indigo-700">{{ scoreDistribution.range70 }} <span class="text-xs font-normal">人</span></span>
+                                <span class="text-[10px] text-indigo-600 block mt-0.5">{{ scoreDistribution.percent70 }}%</span>
+                            </div>
+                            <div class="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+                                <span class="text-xs font-bold text-amber-800 block">60 ~ 69分</span>
+                                <span class="text-xl font-black font-mono text-amber-700">{{ scoreDistribution.range60 }} <span class="text-xs font-normal">人</span></span>
+                                <span class="text-[10px] text-amber-600 block mt-0.5">{{ scoreDistribution.percent60 }}%</span>
+                            </div>
+                            <div class="bg-rose-50 border border-rose-200 rounded-xl p-3 text-center col-span-2 sm:col-span-1">
+                                <span class="text-xs font-bold text-rose-800 block">60分以下 (不及格)</span>
+                                <span class="text-xl font-black font-mono text-rose-700">{{ scoreDistribution.rangeBelow60 }} <span class="text-xs font-normal">人</span></span>
+                                <span class="text-[10px] text-rose-600 block mt-0.5">{{ scoreDistribution.percentBelow60 }}%</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 前三名獎台 -->
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                        <!-- 第二名 -->
+                        <div v-if="sortedRankings.length > 1" class="bg-gradient-to-b from-slate-100 to-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col items-center text-center relative overflow-hidden order-2 md:order-1 mt-4 md:mt-0">
+                            <div class="w-10 h-10 bg-slate-300 text-slate-700 rounded-full flex items-center justify-center font-bold text-lg mb-2 shadow">2</div>
+                            <span class="text-2xl mb-1">🥈</span>
+                            <h3 class="font-bold text-lg text-slate-800">{{ sortedRankings[1].name }}</h3>
+                            <p class="text-xs text-slate-500">座號 {{ sortedRankings[1].id }}</p>
+                            <div class="mt-4 pt-3 border-t border-slate-200 w-full flex justify-around text-xs">
+                                <div><span class="text-slate-400">總分:</span> <strong class="text-slate-800 font-mono text-sm">{{ sortedRankings[1].total }}</strong></div>
+                                <div><span class="text-slate-400">平均:</span> <strong class="text-indigo-600 font-mono text-sm">{{ sortedRankings[1].avg }}</strong></div>
+                            </div>
+                        </div>
+
+                        <!-- 第一名 -->
+                        <div v-if="sortedRankings.length > 0" class="bg-gradient-to-b from-amber-50 to-white p-6 rounded-2xl border-2 border-amber-300 shadow-md flex flex-col items-center text-center relative overflow-hidden order-1 md:order-2">
+                            <div class="w-12 h-12 bg-amber-400 text-amber-950 rounded-full flex items-center justify-center font-extrabold text-xl mb-2 shadow-lg">1</div>
+                            <span class="text-4xl mb-1">🥇</span>
+                            <h3 class="font-bold text-xl text-amber-950">{{ sortedRankings[0].name }}</h3>
+                            <p class="text-xs text-amber-700">座號 {{ sortedRankings[0].id }}</p>
+                            <div class="mt-4 pt-3 border-t border-amber-200 w-full flex justify-around text-xs">
+                                <div><span class="text-amber-700/70">總分:</span> <strong class="text-amber-950 font-mono text-base">{{ sortedRankings[0].total }}</strong></div>
+                                <div><span class="text-amber-700/70">平均:</span> <strong class="text-indigo-700 font-mono text-base">{{ sortedRankings[0].avg }}</strong></div>
+                            </div>
+                        </div>
+
+                        <!-- 第三名 -->
+                        <div v-if="sortedRankings.length > 2" class="bg-gradient-to-b from-amber-900/5 to-white p-5 rounded-2xl border border-amber-800/20 shadow-sm flex flex-col items-center text-center relative overflow-hidden order-3 mt-4 md:mt-0">
+                            <div class="w-10 h-10 bg-amber-700/30 text-amber-900 rounded-full flex items-center justify-center font-bold text-lg mb-2 shadow">3</div>
+                            <span class="text-2xl mb-1">🥉</span>
+                            <h3 class="font-bold text-lg text-slate-800">{{ sortedRankings[2].name }}</h3>
+                            <p class="text-xs text-slate-500">座號 {{ sortedRankings[2].id }}</p>
+                            <div class="mt-4 pt-3 border-t border-slate-200 w-full flex justify-around text-xs">
+                                <div><span class="text-slate-400">總分:</span> <strong class="text-slate-800 font-mono text-sm">{{ sortedRankings[2].total }}</strong></div>
+                                <div><span class="text-slate-400">平均:</span> <strong class="text-indigo-600 font-mono text-sm">{{ sortedRankings[2].avg }}</strong></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 完整班級總排名表 -->
+                    <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                        <table class="w-full text-left border-collapse">
+                            <thead class="bg-slate-50 border-b border-slate-200">
+                                <tr>
+                                    <th class="py-3.5 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider w-20 text-center">名次</th>
+                                    <th class="py-3.5 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider w-20">座號</th>
+                                    <th class="py-3.5 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider">姓名</th>
+                                    <th class="py-3.5 px-6 text-xs font-bold text-indigo-600 uppercase tracking-wider text-right font-mono">採計總分</th>
+                                    <th class="py-3.5 px-6 text-xs font-bold text-indigo-600 uppercase tracking-wider text-right font-mono">個人平均</th>
+                                    <th class="py-3.5 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider text-center no-print">操作</th>
+                                </tr>
+                            </thead>
+                            <tbody class="divide-y divide-slate-100 text-sm">
+                                <tr v-for="item in sortedRankings" :key="item.id" class="hover:bg-slate-50">
+                                    <td class="py-3 px-6 text-center">
+                                        <span :class="getRankBadgeClass(item.rank)" class="px-3 py-1 rounded-full text-xs font-bold inline-block">
+                                            第 {{ item.rank }} 名
+                                        </span>
+                                    </td>
+                                    <td class="py-3 px-6 font-mono text-slate-400">{{ item.id }}</td>
+                                    <td class="py-3 px-6 font-semibold text-slate-800">{{ item.name }}</td>
+                                    <td class="py-3 px-6 text-right font-mono font-bold text-slate-800">{{ item.total }}</td>
+                                    <td class="py-3 px-6 text-right font-mono font-bold text-indigo-600">{{ item.avg }}</td>
+                                    <td class="py-3 px-6 text-center no-print">
+                                        <button @click="printSingleStudent(item.id)" class="px-2.5 py-1 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 font-semibold rounded-lg transition-all flex items-center gap-1 mx-auto">
+                                            <i class="fa-solid fa-print text-[10px]"></i> 印成績條
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- 頁籤 3: 進步獎評比器 -->
+                <div v-if="activeTab === 'progress'" class="space-y-6 no-print">
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                        <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2 mb-2">
+                            <i class="fa-solid fa-arrow-trend-up text-emerald-500"></i>
+                            進步獎計算評比器
+                        </h2>
+                        <p class="text-xs text-slate-500 mb-6">請選擇要比對的兩次段考，系統會自動比對名次提升數或總分增加幅度並排序出進步獎！</p>
+
+                        <!-- 進步獎條件設定選單 -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1.5">1. 前次段考 (基準對照)：</label>
+                                <select v-model="progressBaseExamId" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                    <option v-for="exam in exams" :key="exam.id" :value="exam.id">
+                                        {{ exam.name }}
+                                    </option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1.5">2. 本次段考 (評比目標)：</label>
+                                <select v-model="progressTargetExamId" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                    <option v-for="exam in exams" :key="exam.id" :value="exam.id">
+                                        {{ exam.name }}
+                                    </option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label class="block text-xs font-bold text-slate-600 mb-1.5">3. 評比排序依據：</label>
+                                <select v-model="progressMetric" class="w-full bg-white border border-slate-300 rounded-xl px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                                    <option value="rank">名次進步最多 (名次提升數)</option>
+                                    <option value="score">總分進步最多 (分數增加值)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div v-if="progressBaseExamId === progressTargetExamId" class="p-4 bg-amber-50 border border-amber-200 rounded-xl text-amber-800 text-sm flex items-center gap-2">
+                        <i class="fa-solid fa-triangle-exclamation text-amber-600"></i>
+                        請選擇兩個不同的段考進行進步程度比對！
+                    </div>
+
+                    <template v-else>
+                        <!-- 進步獎前三名亮點卡片 -->
+                        <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+                            <div 
+                                v-for="(winner, idx) in topProgressStudents.slice(0, 3)" 
+                                :key="winner.id"
+                                class="bg-gradient-to-br from-emerald-500 to-teal-700 text-white rounded-2xl p-6 shadow-lg relative overflow-hidden flex flex-col justify-between"
+                            >
+                                <div class="absolute -right-4 -bottom-4 text-white/10 text-8xl font-extrabold select-none">
+                                    #{{ idx + 1 }}
+                                </div>
+                                <div>
+                                    <div class="flex items-center justify-between mb-2">
+                                        <span class="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-bold tracking-wider uppercase">
+                                            進步獎 第 {{ idx + 1 }} 名
+                                        </span>
+                                        <span class="text-2xl">🎖️</span>
+                                    </div>
+                                    <h3 class="text-2xl font-bold">{{ winner.name }}</h3>
+                                    <p class="text-xs text-emerald-100">座號 {{ winner.id }}</p>
+                                </div>
+
+                                <div class="mt-6 pt-4 border-t border-white/20 grid grid-cols-2 gap-2 text-center">
+                                    <div class="bg-white/10 rounded-xl p-2">
+                                        <span class="text-[10px] text-emerald-100 block">名次變化</span>
+                                        <span class="text-sm font-bold font-mono">
+                                            第{{ winner.baseRank }}名 ➜ 第{{ winner.targetRank }}名
+                                        </span>
+                                    </div>
+                                    <div class="bg-white/10 rounded-xl p-2">
+                                        <span class="text-[10px] text-emerald-100 block">
+                                            {{ progressMetric === 'rank' ? '名次提升' : '總分增加' }}
+                                        </span>
+                                        <span class="text-sm font-bold font-mono text-yellow-300">
+                                            {{ progressMetric === 'rank' ? '▲ ' + winner.rankDiff + ' 名' : '+' + winner.scoreDiff + ' 分' }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 完整進步排行榜 -->
+                        <div class="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+                            <div class="px-6 py-4 border-b border-slate-100 font-bold text-slate-800">
+                                完整進步排行總覽 (從 {{ getExamName(progressBaseExamId) }} 至 {{ getExamName(progressTargetExamId) }})
+                            </div>
+                            <table class="w-full text-left border-collapse">
+                                <thead class="bg-slate-50 border-b border-slate-200">
+                                    <tr>
+                                        <th class="py-3.5 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider w-16 text-center">排序</th>
+                                        <th class="py-3.5 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider w-16">座號</th>
+                                        <th class="py-3.5 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider">姓名</th>
+                                        <th class="py-3.5 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">基準名次</th>
+                                        <th class="py-3.5 px-6 text-xs font-bold text-slate-500 uppercase tracking-wider text-center">目標名次</th>
+                                        <th class="py-3.5 px-6 text-xs font-bold text-emerald-600 uppercase tracking-wider text-center">名次變動</th>
+                                        <th class="py-3.5 px-6 text-xs font-bold text-emerald-600 uppercase tracking-wider text-center">總分變動</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-slate-100 text-sm">
+                                    <tr v-for="(item, index) in topProgressStudents" :key="item.id" class="hover:bg-slate-50">
+                                        <td class="py-3 px-6 text-center font-bold font-mono text-slate-500">{{ index + 1 }}</td>
+                                        <td class="py-3 px-6 font-mono text-slate-400">{{ item.id }}</td>
+                                        <td class="py-3 px-6 font-semibold text-slate-800">{{ item.name }}</td>
+                                        <td class="py-3 px-6 text-center font-mono text-slate-600">第 {{ item.baseRank }} 名</td>
+                                        <td class="py-3 px-6 text-center font-mono font-bold text-slate-800">第 {{ item.targetRank }} 名</td>
+                                        <td class="py-3 px-6 text-center font-mono font-bold">
+                                            <span v-if="item.rankDiff > 0" class="text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full">
+                                                ▲ 進步 {{ item.rankDiff }} 名
+                                            </span>
+                                            <span v-else-if="item.rankDiff < 0" class="text-rose-500 bg-rose-50 px-2 py-0.5 rounded-full">
+                                                ▼ 退步 {{ Math.abs(item.rankDiff) }} 名
+                                            </span>
+                                            <span v-else class="text-slate-400">持平</span>
+                                        </td>
+                                        <td class="py-3 px-6 text-center font-mono font-bold">
+                                            <span v-if="item.scoreDiff > 0" class="text-emerald-600">
+                                                +{{ item.scoreDiff }} 分
+                                            </span>
+                                            <span v-else-if="item.scoreDiff < 0" class="text-rose-500">
+                                                {{ item.scoreDiff }} 分
+                                            </span>
+                                            <span v-else class="text-slate-400">0 分</span>
+                                        </td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </template>
+                </div>
+
+                <!-- 頁籤 4: 單人/小成績單列印 -->
+                <div v-if="activeTab === 'slips'" class="space-y-6">
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 no-print">
+                        <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+                            <div>
+                                <h2 class="text-xl font-bold text-slate-800 flex items-center gap-2">
+                                    <i class="fa-solid fa-print text-indigo-600"></i>
+                                    單人/小成績單列印 (精簡切片紙條)
+                                </h2>
+                                <p class="text-xs text-slate-500 mt-1">可選取單一學生列印，或選取「列印全班」一次印出全班31張小成績條。</p>
+                            </div>
+                            <div class="flex items-center gap-3 w-full sm:w-auto">
+                                <select v-model="selectedPrintStudentId" class="bg-slate-50 border border-slate-300 rounded-xl px-3 py-2 text-sm font-semibold focus:outline-none focus:ring-2 focus:ring-indigo-500 flex-1 sm:flex-none">
+                                    <option value="all">-- 列印全班 (31名學生) --</option>
+                                    <option v-for="st in students" :key="st.id" :value="st.id">
+                                        {{ st.id }}號 - {{ st.name }}
+                                    </option>
+                                </select>
+                                <button @click="triggerPrint" class="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-sm rounded-xl shadow-lg shadow-indigo-200 flex items-center gap-2 transition-all whitespace-nowrap">
+                                    <i class="fa-solid fa-print"></i> 立即列印
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- 全班概況摘要 -->
+                        <div class="mt-4 pt-4 border-t border-slate-100 grid grid-cols-2 sm:grid-cols-6 gap-2 text-xs">
+                            <div class="bg-slate-50 p-2 rounded-lg"><span class="text-slate-400 block">段考名稱</span><strong class="text-slate-800">{{ currentExam.name }}</strong></div>
+                            <div class="bg-slate-50 p-2 rounded-lg"><span class="text-slate-400 block">班級人數</span><strong class="text-slate-800">{{ students.length }} 人</strong></div>
+                            <div class="bg-slate-50 p-2 rounded-lg"><span class="text-slate-400 block">全班平均</span><strong class="text-indigo-600 font-mono">{{ classAverage }} 分</strong></div>
+                            <div class="bg-emerald-50 p-2 rounded-lg"><span class="text-emerald-600 block">90分以上</span><strong class="text-emerald-800 font-mono">{{ scoreDistribution.range90 }}人</strong></div>
+                            <div class="bg-blue-50 p-2 rounded-lg"><span class="text-blue-600 block">80~89分</span><strong class="text-blue-800 font-mono">{{ scoreDistribution.range80 }}人</strong></div>
+                            <div class="bg-rose-50 p-2 rounded-lg"><span class="text-rose-600 block">60分以下</span><strong class="text-rose-800 font-mono">{{ scoreDistribution.rangeBelow60 }}人</strong></div>
+                        </div>
+                    </div>
+
+                    <!-- 可列印小成績單區域 -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div 
+                            v-for="st in printableStudents" 
+                            :key="st.id"
+                            class="mini-slip bg-white p-5 rounded-2xl border-2 border-slate-200 shadow-sm relative overflow-hidden flex flex-col justify-between"
+                        >
+                            <div>
+                                <div class="flex justify-between items-start border-b border-slate-200 pb-2 mb-3">
+                                    <div>
+                                        <span class="text-[10px] font-bold tracking-widest text-indigo-600 uppercase block">個人成績通知單</span>
+                                        <h3 class="font-bold text-base text-slate-800">
+                                            {{ currentExam.name }} - 座號 {{ st.id }} {{ st.name }}
+                                        </h3>
+                                    </div>
+                                    <div class="text-right">
+                                        <span class="bg-indigo-600 text-white px-2.5 py-0.5 rounded-full text-xs font-extrabold inline-block">
+                                            第 {{ getStudentStats(selectedExamId, st.id).rank }} 名
+                                        </span>
+                                    </div>
+                                </div>
+
+                                <!-- 科目成績小表 -->
+                                <table class="w-full text-xs text-left mb-3 border-collapse">
+                                    <thead>
+                                        <tr class="bg-slate-100 text-slate-600 border-b border-slate-200">
+                                            <th class="py-1 px-2">科目</th>
+                                            <th v-for="sub in subjects" :key="sub.id" class="py-1 px-1 text-center font-semibold">
+                                                {{ sub.name }}
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr class="border-b border-slate-100">
+                                            <td class="py-1.5 px-2 font-medium text-slate-500">得分</td>
+                                            <td v-for="sub in subjects" :key="sub.id" class="py-1.5 px-1 text-center font-mono font-bold" :class="{'text-slate-400 font-normal': !sub.includeInTotal, 'text-rose-600': grades[selectedExamId][st.id][sub.id] < 60}">
+                                                {{ grades[selectedExamId][st.id][sub.id] !== '' ? grades[selectedExamId][st.id][sub.id] : '-' }}
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- 個人總結與統計 -->
+                            <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 text-xs grid grid-cols-4 gap-1 text-center">
+                                <div>
+                                    <span class="text-[10px] text-slate-400 block">採計總分</span>
+                                    <strong class="font-mono text-sm text-slate-800">{{ getStudentStats(selectedExamId, st.id).total }}</strong>
+                                </div>
+                                <div>
+                                    <span class="text-[10px] text-slate-400 block">個人平均</span>
+                                    <strong class="font-mono text-sm text-indigo-600">{{ getStudentStats(selectedExamId, st.id).avg }}</strong>
+                                </div>
+                                <div>
+                                    <span class="text-[10px] text-slate-400 block">全班平均</span>
+                                    <strong class="font-mono text-sm text-slate-700">{{ classAverage }}</strong>
+                                </div>
+                                <div>
+                                    <span class="text-[10px] text-slate-400 block">班級排名</span>
+                                    <strong class="font-mono text-sm text-amber-600">第 {{ getStudentStats(selectedExamId, st.id).rank }} 名</strong>
+                                </div>
+                            </div>
+
+                            <!-- 簽章欄 -->
+                            <div class="mt-3 pt-2 border-t border-dashed border-slate-200 flex justify-between items-center text-[10px] text-slate-400">
+                                <span>家長簽章：__________________</span>
+                                <span>導師簽章：__________________</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- 頁籤 5: 設定 (科目/段考/學生) -->
+                <div v-if="activeTab === 'settings'" class="space-y-6 no-print">
+                    
+                    <!-- 科目設定與採計開關 -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                        <div class="flex items-center justify-between mb-4">
+                            <div>
+                                <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                    <i class="fa-solid fa-book text-indigo-500"></i>
+                                    科目設定與採計開關
+                                </h3>
+                                <p class="text-xs text-slate-500 mt-0.5">取消勾選的科目將不會納入總分與名次計算。</p>
+                            </div>
+                            <button @click="showAddSubjectModal = true" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5">
+                                <i class="fa-solid fa-plus"></i> 新增科目
+                            </button>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                            <div 
+                                v-for="sub in subjects" 
+                                :key="sub.id" 
+                                class="p-3.5 rounded-xl border flex items-center justify-between transition-all"
+                                :class="sub.includeInTotal ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200 bg-slate-50'"
+                            >
+                                <div class="flex items-center gap-3">
+                                    <input 
+                                        type="checkbox" 
+                                        :id="'sub-' + sub.id" 
+                                        v-model="sub.includeInTotal"
+                                        class="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
+                                    >
+                                    <label :for="'sub-' + sub.id" class="font-medium text-slate-800 cursor-pointer select-none text-sm">
+                                        {{ sub.name }}
+                                    </label>
+                                </div>
+
+                                <div class="flex items-center gap-2">
+                                    <span :class="sub.includeInTotal ? 'text-emerald-700 font-medium' : 'text-slate-400'" class="text-xs">
+                                        {{ sub.includeInTotal ? '計分中' : '不採計' }}
+                                    </span>
+                                    <button 
+                                        v-if="subjects.length > 1" 
+                                        @click="deleteSubject(sub.id)" 
+                                        class="text-slate-300 hover:text-rose-500 p-1"
+                                        title="刪除科目"
+                                    >
+                                        <i class="fa-solid fa-trash-can text-xs"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 段考項目管理 -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                        <div class="flex items-center justify-between mb-4">
+                            <div>
+                                <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                    <i class="fa-solid fa-calendar-days text-indigo-500"></i>
+                                    段考名稱管理
+                                </h3>
+                                <p class="text-xs text-slate-500 mt-0.5">您可以隨時新增自訂的段考項目。</p>
+                            </div>
+                            <button @click="showAddExamModal = true" class="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-semibold shadow-sm transition-all flex items-center gap-1.5">
+                                <i class="fa-solid fa-plus"></i> 新增段考
+                            </button>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                            <div v-for="exam in exams" :key="exam.id" class="p-3.5 border border-slate-200 rounded-xl bg-white flex items-center justify-between">
+                                <span class="font-semibold text-slate-700 text-sm">{{ exam.name }}</span>
+                                <span v-if="selectedExamId === exam.id" class="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">當前選擇</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 學生名冊管理 (固定 31 人) -->
+                    <div class="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
+                        <div class="mb-4">
+                            <h3 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                                <i class="fa-solid fa-users text-indigo-500"></i>
+                                學生名冊管理 (全班 31 人)
+                            </h3>
+                            <p class="text-xs text-slate-500 mt-0.5">直接修改下方輸入框即可更新學生姓名。</p>
+                        </div>
+
+                        <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                            <div v-for="st in students" :key="st.id" class="flex items-center gap-2 p-2.5 border border-slate-200 rounded-xl bg-slate-50/50 focus-within:bg-white focus-within:border-indigo-400 transition-all">
+                                <span class="w-8 text-center font-mono text-xs font-bold text-slate-400">{{ st.id }}</span>
+                                <input 
+                                    type="text" 
+                                    v-model="st.name" 
+                                    class="w-full bg-transparent text-sm font-medium text-slate-800 focus:outline-none" 
+                                    placeholder="輸入姓名..."
+                                >
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </main>
+        </template>
+
+        <!-- 新增科目彈窗 -->
+        <div v-if="showAddSubjectModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 no-print">
+            <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 space-y-4">
+                <h3 class="text-lg font-bold text-slate-800">新增科目</h3>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">科目名稱：</label>
+                    <input type="text" v-model="newSubjectName" placeholder="例如: 體育、程式設計" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+                </div>
+                <div class="flex items-center gap-2">
+                    <input type="checkbox" id="newSubInc" v-model="newSubjectInclude" class="w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500">
+                    <label for="newSubInc" class="text-sm text-slate-700">納入總分與排名計算</label>
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button @click="showAddSubjectModal = false" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl">取消</button>
+                    <button @click="addSubject" class="px-4 py-2 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl">確認新增</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- 新增段考彈窗 -->
+        <div v-if="showAddExamModal" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/50 backdrop-blur-sm p-4 no-print">
+            <div class="bg-white rounded-2xl shadow-xl max-w-sm w-full p-6 space-y-4">
+                <h3 class="text-lg font-bold text-slate-800">新增段考項目</h3>
+                <div>
+                    <label class="block text-xs font-bold text-slate-600 mb-1">段考名稱：</label>
+                    <input type="text" v-model="newExamName" placeholder="例如: 第四次段考" class="w-full px-3 py-2 border border-slate-300 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 text-sm">
+                </div>
+                <div class="flex justify-end gap-2 pt-2">
+                    <button @click="showAddExamModal = false" class="px-4 py-2 text-xs font-medium text-slate-600 hover:bg-slate-100 rounded-xl">取消</button>
+                    <button @click="addExam" class="px-4 py-2 text-xs font-medium bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl">確認新增</button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        const { createApp, ref, computed, reactive } = Vue;
+
+        createApp({
+            setup() {
+                // 登入驗證 (密碼為 203203，已完全去掉提示)
+                const isAuthenticated = ref(false);
+                const inputPassword = ref('');
+                const authError = ref(false);
+                const showPassword = ref(false);
+
+                const checkPassword = () => {
+                    if (inputPassword.value === '203203') {
+                        isAuthenticated.value = true;
+                        authError.value = false;
+                    } else {
+                        authError.value = true;
+                        inputPassword.value = '';
+                    }
+                };
+
+                const logout = () => {
+                    isAuthenticated.value = false;
+                    inputPassword.value = '';
+                };
+
+                // 頁籤與搜尋狀態
+                const activeTab = ref('entry');
+                const searchQuery = ref('');
+                const selectedPrintStudentId = ref('all');
+
+                // 段考列表
+                const exams = ref([
+                    { id: 'exam1', name: '第一次段考' },
+                    { id: 'exam2', name: '第二次段考' },
+                    { id: 'exam3', name: '期末段考' }
+                ]);
+                const selectedExamId = ref('exam1');
+                const currentExam = computed(() => {
+                    return exams.value.find(e => e.id === selectedExamId.value) || exams.value[0];
+                });
+
+                // 科目列表 (包含納入/不納入採計開關)
+                const subjects = ref([
+                    { id: 'sub1', name: '國文', includeInTotal: true },
+                    { id: 'sub2', name: '英文', includeInTotal: true },
+                    { id: 'sub3', name: '數學', includeInTotal: true },
+                    { id: 'sub4', name: '自然', includeInTotal: true },
+                    { id: 'sub5', name: '社會', includeInTotal: true },
+                    { id: 'sub6', name: '藝能(不採計)', includeInTotal: false }
+                ]);
+
+                // 預設 31 位學生名冊
+                const students = ref(
+                    Array.from({ length: 31 }, (_, index) => {
+                        const numStr = String(index + 1).padStart(2, '0');
+                        return {
+                            id: index + 1,
+                            name: `學生 ${numStr}`
+                        };
+                    })
+                );
+
+                // 成績資料結構：{ [examId]: { [studentId]: { [subjectId]: score } } }
+                const grades = reactive({});
+
+                // 初始化預設隨機分數 (方便載入後直接看效果)
+                const initGrades = () => {
+                    exams.value.forEach(exam => {
+                        if (!grades[exam.id]) {
+                            grades[exam.id] = {};
+                        }
+                        students.value.forEach(st => {
+                            if (!grades[exam.id][st.id]) {
+                                grades[exam.id][st.id] = {};
+                            }
+                            subjects.value.forEach(sub => {
+                                if (grades[exam.id][st.id][sub.id] === undefined) {
+                                    const baseScore = 55 + Math.floor(Math.random() * 43);
+                                    grades[exam.id][st.id][sub.id] = baseScore;
+                                }
+                            });
+                        });
+                    });
+                };
+
+                initGrades();
+
+                // 搜尋學生過濾
+                const filteredStudents = computed(() => {
+                    if (!searchQuery.value.trim()) return students.value;
+                    const q = searchQuery.value.toLowerCase();
+                    return students.value.filter(s => 
+                        s.name.toLowerCase().includes(q) || String(s.id).includes(q)
+                    );
+                });
+
+                // 採計的科目數量
+                const includedSubjectsCount = computed(() => {
+                    return subjects.value.filter(s => s.includeInTotal).length;
+                });
+
+                // 計算學生採計總分
+                const calculateTotal = (examId, studentId) => {
+                    const stGrades = grades[examId]?.[studentId];
+                    if (!stGrades) return 0;
+
+                    return subjects.value.reduce((sum, sub) => {
+                        if (sub.includeInTotal) {
+                            const val = Number(stGrades[sub.id]) || 0;
+                            return sum + val;
+                        }
+                        return sum;
+                    }, 0);
+                };
+
+                // 取得特定段考的排名列表
+                const getExamRankings = (examId) => {
+                    const list = students.value.map(st => {
+                        const total = calculateTotal(examId, st.id);
+                        const incCount = includedSubjectsCount.value || 1;
+                        const avg = (total / incCount).toFixed(1);
+                        return {
+                            id: st.id,
+                            name: st.name,
+                            total,
+                            avg: parseFloat(avg)
+                        };
+                    });
+
+                    // 依總分由高至低排序
+                    list.sort((a, b) => b.total - a.total);
+
+                    // 計算同分同名次
+                    let currentRank = 1;
+                    for (let i = 0; i < list.length; i++) {
+                        if (i > 0 && list[i].total < list[i - 1].total) {
+                            currentRank = i + 1;
+                        }
+                        list[i].rank = currentRank;
+                    }
+
+                    return list;
+                };
+
+                // 當前段考的全班總平均
+                const classAverage = computed(() => {
+                    const rankings = getExamRankings(selectedExamId.value);
+                    if (!rankings.length) return '0.0';
+                    const sumAvg = rankings.reduce((acc, curr) => acc + curr.avg, 0);
+                    return (sumAvg / rankings.length).toFixed(1);
+                });
+
+                // 成績區間統計 (90+, 80~89, 70~79, 60~69, <60)
+                const scoreDistribution = computed(() => {
+                    const rankings = getExamRankings(selectedExamId.value);
+                    const totalCount = rankings.length || 1;
+
+                    let range90 = 0;
+                    let range80 = 0;
+                    let range70 = 0;
+                    let range60 = 0;
+                    let rangeBelow60 = 0;
+
+                    rankings.forEach(item => {
+                        if (item.avg >= 90) range90++;
+                        else if (item.avg >= 80) range80++;
+                        else if (item.avg >= 70) range70++;
+                        else if (item.avg >= 60) range60++;
+                        else rangeBelow60++;
+                    });
+
+                    return {
+                        range90,
+                        range80,
+                        range70,
+                        range60,
+                        rangeBelow60,
+                        percent90: Math.round((range90 / totalCount) * 100),
+                        percent80: Math.round((range80 / totalCount) * 100),
+                        percent70: Math.round((range70 / totalCount) * 100),
+                        percent60: Math.round((range60 / totalCount) * 100),
+                        percentBelow60: Math.round((rangeBelow60 / totalCount) * 100)
+                    };
+                });
+
+                // 取得單人統計資訊 (總分、平均、名次)
+                const getStudentStats = (examId, studentId) => {
+                    const rankingList = getExamRankings(examId);
+                    const found = rankingList.find(item => item.id === studentId);
+                    return found || { total: 0, avg: '0.0', rank: '-' };
+                };
+
+                // 當前選擇的排序名冊 (頁籤2用)
+                const sortedRankings = computed(() => {
+                    return getExamRankings(selectedExamId.value);
+                });
+
+                // 可列印學生過濾 (頁籤4用)
+                const printableStudents = computed(() => {
+                    if (selectedPrintStudentId.value === 'all') {
+                        return students.value;
+                    }
+                    return students.value.filter(s => s.id === Number(selectedPrintStudentId.value));
+                });
+
+                const printSingleStudent = (studentId) => {
+                    selectedPrintStudentId.value = studentId;
+                    activeTab.value = 'slips';
+                };
+
+                const triggerPrint = () => {
+                    window.print();
+                };
+
+                // 進步獎相關設定與計算 (頁籤3)
+                const progressBaseExamId = ref('exam1');
+                const progressTargetExamId = ref('exam2');
+                const progressMetric = ref('rank'); // 'rank' (名次進步) 或 'score' (分數增加)
+
+                const getExamName = (eId) => {
+                    return exams.value.find(e => e.id === eId)?.name || eId;
+                };
+
+                // 計算進步獎排行榜
+                const topProgressStudents = computed(() => {
+                    if (progressBaseExamId.value === progressTargetExamId.value) return [];
+
+                    const baseRanks = getExamRankings(progressBaseExamId.value);
+                    const targetRanks = getExamRankings(progressTargetExamId.value);
+
+                    const results = students.value.map(st => {
+                        const baseObj = baseRanks.find(b => b.id === st.id) || { rank: 31, total: 0 };
+                        const targetObj = targetRanks.find(t => t.id === st.id) || { rank: 31, total: 0 };
+
+                        const rankDiff = baseObj.rank - targetObj.rank; // 正數代表名次前進
+                        const scoreDiff = targetObj.total - baseObj.total; // 正數代表分數增加
+
+                        return {
+                            id: st.id,
+                            name: st.name,
+                            baseRank: baseObj.rank,
+                            targetRank: targetObj.rank,
+                            baseTotal: baseObj.total,
+                            targetTotal: targetObj.total,
+                            rankDiff,
+                            scoreDiff
+                        };
+                    });
+
+                    // 依選擇的指標排序
+                    if (progressMetric.value === 'rank') {
+                        results.sort((a, b) => b.rankDiff - a.rankDiff || b.scoreDiff - a.scoreDiff);
+                    } else {
+                        results.sort((a, b) => b.scoreDiff - a.scoreDiff || b.rankDiff - a.rankDiff);
+                    }
+
+                    return results;
+                });
+
+                // 新增科目與段考
+                const showAddSubjectModal = ref(false);
+                const newSubjectName = ref('');
+                const newSubjectInclude = ref(true);
+
+                const addSubject = () => {
+                    if (!newSubjectName.value.trim()) return;
+                    const newId = 'sub_' + Date.now();
+                    subjects.value.push({
+                        id: newId,
+                        name: newSubjectName.value.trim(),
+                        includeInTotal: newSubjectInclude.value
+                    });
+
+                    // 為新科目補初始化分數 0
+                    exams.value.forEach(e => {
+                        students.value.forEach(st => {
+                            if (grades[e.id] && grades[e.id][st.id]) {
+                                grades[e.id][st.id][newId] = 0;
+                            }
+                        });
+                    });
+
+                    newSubjectName.value = '';
+                    showAddSubjectModal.value = false;
+                };
+
+                const deleteSubject = (subId) => {
+                    subjects.value = subjects.value.filter(s => s.id !== subId);
+                };
+
+                const showAddExamModal = ref(false);
+                const newExamName = ref('');
+
+                const addExam = () => {
+                    if (!newExamName.value.trim()) return;
+                    const newId = 'exam_' + Date.now();
+                    exams.value.push({
+                        id: newId,
+                        name: newExamName.value.trim()
+                    });
+
+                    // 初始化新段考的分數表
+                    grades[newId] = {};
+                    students.value.forEach(st => {
+                        grades[newId][st.id] = {};
+                        subjects.value.forEach(sub => {
+                            grades[newId][st.id][sub.id] = 0;
+                        });
+                    });
+
+                    selectedExamId.value = newId;
+                    newExamName.value = '';
+                    showAddExamModal.value = false;
+                };
+
+                const editStudentName = (student) => {
+                    const name = prompt('請輸入學生真實姓名：', student.name);
+                    if (name && name.trim()) {
+                        student.name = name.trim();
+                    }
+                };
+
+                const resetScoresConfirm = () => {
+                    if (confirm(`確定要清空 ${currentExam.value.name} 的所有成績嗎？`)) {
+                        students.value.forEach(st => {
+                            subjects.value.forEach(sub => {
+                                grades[selectedExamId.value][st.id][sub.id] = '';
+                            });
+                        });
+                    }
+                };
+
+                const getRankBadgeClass = (rank) => {
+                    if (rank === 1) return 'bg-amber-100 text-amber-800 border border-amber-300';
+                    if (rank === 2) return 'bg-slate-200 text-slate-700 border border-slate-300';
+                    if (rank === 3) return 'bg-amber-900/10 text-amber-900 border border-amber-800/20';
+                    return 'bg-slate-100 text-slate-600';
+                };
+
+                return {
+                    isAuthenticated,
+                    inputPassword,
+                    authError,
+                    showPassword,
+                    checkPassword,
+                    logout,
+                    activeTab,
+                    searchQuery,
+                    selectedPrintStudentId,
+                    exams,
+                    selectedExamId,
+                    currentExam,
+                    subjects,
+                    students,
+                    grades,
+                    filteredStudents,
+                    includedSubjectsCount,
+                    classAverage,
+                    scoreDistribution,
+                    printableStudents,
+                    printSingleStudent,
+                    triggerPrint,
+                    getStudentStats,
+                    sortedRankings,
+                    progressBaseExamId,
+                    progressTargetExamId,
+                    progressMetric,
+                    getExamName,
+                    topProgressStudents,
+                    showAddSubjectModal,
+                    newSubjectName,
+                    newSubjectInclude,
+                    addSubject,
+                    deleteSubject,
+                    showAddExamModal,
+                    newExamName,
+                    addExam,
+                    editStudentName,
+                    resetScoresConfirm,
+                    getRankBadgeClass
+                };
+            }
+        }).mount('#app');
+    </script>
+</body>
+</html>
